@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<solver>
+	<!-- 
+  <environmentMode>FAST_ASSERT</environmentMode>
+   -->
+  <scanAnnotatedClasses/>
+
+  <scoreDirectorFactory>
+    <scoreDefinitionType>HARD_SOFT</scoreDefinitionType>
+    <scoreDrl>com/jboss/publiplanner/plannerScoreRules.drl</scoreDrl>
+  </scoreDirectorFactory>
+
+  <termination>
+    <secondsSpentLimit>20</secondsSpentLimit>
+  </termination>
+</solver>

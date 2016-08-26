@@ -1,0 +1,148 @@
+package com.jboss.publiplanner;
+    dialect "java"
+    
+import org.optaplanner.core.api.score.buildin.hardsoft.HardSoftScoreHolder;
+
+import com.jboss.publiplanner.domain.PubliPlanning;
+import com.jboss.publiplanner.domain.Block;
+import com.jboss.publiplanner.domain.Channel;
+import com.jboss.publiplanner.domain.CommercialAssignment;
+import com.jboss.publiplanner.domain.Customer;
+import com.jboss.publiplanner.domain.GoalChannelDayPart;
+import com.jboss.publiplanner.domain.GoalPeriodTime;
+import com.jboss.publiplanner.domain.Video;
+
+global HardSoftScoreHolder scoreHolder;
+
+// ############################################################################
+// Hard constraints
+// ############################################################################
+
+//Check that all the commercials in a certain period have the desired duration
+rule "duration"
+	when
+		GoalPeriodTime($customer : customer, $start : start, $end : end, $durationGoal : duration)
+		CommercialAssignment(customer == $customer, duration != $durationGoal, isInPeriod($start,$end))
+	then
+		scoreHolder.addHardConstraintMatch(kcontext, - $durationGoal);
+end
+
+//Check that all commercials are played in desired channels
+rule "channel"
+	when
+		CommercialAssignment($customer : customer, $channel : channel)
+		not (exists GoalChannelDayPart( customer == $customer, channel == $channel))
+	then
+		scoreHolder.addHardConstraintMatch(kcontext,  -10);
+end
+
+//Total commercials duration cannot exceed block duration
+rule "capacity"
+    when
+        $b : Block($c : capacity)
+        $total : Number(intValue > $c) from accumulate(
+            CommercialAssignment(
+                block == $b,
+                $d : duration),
+            sum($d)
+        )
+    then
+        scoreHolder.addHardConstraintMatch(kcontext, $c - $total.intValue());
+end
+
+// ############################################################################
+// Soft constraints
+// ############################################################################
+
+//Check that all the commercials of certain duration and in a certain period sum the desired GRPs
+rule "durationgoal"
+	when
+		GoalPeriodTime($customer : customer, $start : start, $end : end, $durationGoal : duration, $grpGoal : grpGoal)
+		$total : Number(intValue < $grpGoal) from accumulate(
+			CommercialAssignment(
+				customer == $customer, 
+				duration == $durationGoal, 
+				$grps : grps, 
+				isInPeriod($start,$end)),
+			sum($grps)
+		)
+	then
+		scoreHolder.addSoftConstraintMatch(kcontext, $total.intValue() - $grpGoal);
+end
+
+//Campaign needs to have desired GRPS for Prime time
+rule "primetime"
+	when
+		GoalChannelDayPart($customer : customer, $primeTime : grpPrimeTime, $channel : channel)
+		$total : Number(intValue < $primeTime) from accumulate(
+            CommercialAssignment(
+                customer == $customer,
+                channel == $channel,
+                $grps : grps),
+            sum($grps)
+        )
+	then
+		scoreHolder.addSoftConstraintMatch(kcontext, $total.intValue() - $primeTime);
+end
+
+//Campaign needs to have desired GRPS for Day time
+rule "daytime"
+	when
+		GoalChannelDayPart($customer : customer, $dayTime : grpDayTime, $channel : channel)
+		$total : Number(intValue < $dayTime) from accumulate(
+            CommercialAssignment(
+                customer == $customer,
+                channel == $channel,
+                $grps : grps),
+            sum($grps)
+        )
+	then
+		scoreHolder.addSoftConstraintMatch(kcontext, $total.intValue() - $dayTime);
+end
+
+
+//- La distribución de anuncios debe ser lo más uniforme posible
+//	* Mayor número de días
+//	* Mismo número de anuncios por canales
+//	* Day time y Prime time más o menos iguales
+
+//Day fairness distribution
+rule "dayfairness"
+	when
+		CommercialAssignment($start : start)
+		$count: Number () from accumulate(
+			$commercial : CommercialAssignment(start == $start),
+			count($commercial)
+		)
+	then
+		scoreHolder.addSoftConstraintMatch(kcontext, - ($count.intValue() * $count.intValue()));
+end
+
+//Channel fairness distribution
+rule "channelfairness"
+	when
+		GoalChannelDayPart($customer : customer, $channel : channel)
+		$count: Number () from accumulate(
+			$commercial : CommercialAssignment(customer == $customer, channel == $channel),
+			count($commercial)
+		)
+	then
+		scoreHolder.addSoftConstraintMatch(kcontext, - ($count.intValue() * $count.intValue()));
+end
+
+//Time fairness distribution
+rule "timefairness"
+	when
+		GoalChannelDayPart($customer : customer)
+		$countPT: Number () from accumulate(
+			$commercialPT : CommercialAssignment(customer == $customer, isPrimeTime()),
+			count($commercialPT)
+		)
+		$countDT: Number () from accumulate(
+			$commercialDT : CommercialAssignment(customer == $customer, isPrimeTime() == false ),
+			count($commercialDT)
+		)
+	then
+		scoreHolder.addSoftConstraintMatch(kcontext, - ( ($countPT.intValue() - $countDT.intValue() ) * ( $countPT.intValue() - $countDT.intValue() )));
+end
+	
